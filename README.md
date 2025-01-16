@@ -31,6 +31,9 @@
    # Ваш токен для API Тинькофф
    TOKEN = "ваш_токен"
    ```
+
+   Токен можно получить на странице [настроек API Тинькофф Инвестиции](https://www.tbank.ru/invest/settings/api/).
+
 2. В файле `run_invest.py` задайте список ценных бумаг и суммы для их покупки. Пример:
    ```python
    SHARES = {
@@ -43,6 +46,15 @@
        "SU26248RMFS3": 3000 + 1269.33, # ОФЗ
    }
    ```
+---
+
+### Зависимости
+- [tinkoff-investments](https://github.com/Tinkoff/invest-python)
+
+Установите зависимости через файл `requirements.txt`:
+```bash
+pip3 install -r requirements.txt
+```
 
 ---
 
@@ -53,14 +65,6 @@
    ```
 2. Скрипт выполнит покупку всех указанных бумаг на заданные суммы и выведет статус выполнения операций в консоль.
 
----
 
-### Зависимости
-- [tinkoff-investments](https://github.com/Tinkoff/invest-python)
-
-Установите зависимости через файл `requirements.txt`:
-```bash
-pip3 install -r requirements.txt
-```
 
 
