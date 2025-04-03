@@ -1,163 +1,194 @@
-from tinkoff.invest import Client, MoneyValue, OrderType, OrderDirection
+import argparse
 import uuid
 import config
+import time
+from tinkoff.invest import Client, MoneyValue, OrderType, OrderDirection
 
 # Задайте параметры
-TOKEN = config.TOKEN
+TOKEN = config.TOKEN  # Токен для доступа к API
+DEFAULT_DISCOUNT = 3  # Дефолтная скидка в процентах
 
+# Список ценных бумаг и параметры заявок
+# - "amount": сумма, на которую планируется покупка данного инструмента.
+# - "discount": процентная скидка от текущей рыночной цены для покупки. Если параметр не указан, используется дефолтная скидка DEFAULT_DISCOUNT.
+# - "discount_price": фиксированная цена для покупки бумаги, игнорируя рыночную цену и скидку.
+# 
+# В зависимости от наличия скидки или фиксированной цены, будет рассчитана цена, по которой выставляется заявка.
 SHARES = {
-    "TRUR": 3000,             # ETF
-    "TMOS": 3000,             # ETF
-    "TDIV": 3000,             # ETF
-    "TGLD": 3000,             # ETF
-    "SBER": 3000,             # Акция
-    "MOEX": 3000,             # Акция
-    "SU26248RMFS3": 3000,     # ОФЗ
+    "TRUR": {"amount": 3000, "discount_price": 8.6},
+    "TMOS": {"amount": 3000},
+    "TDIV": {"amount": 3000, "discount_price": 10},
+    "TGLD": {"amount": 3000, "discount": 2},
+    "SBER": {"amount": 3000, "discount_price": 302},
+    "MOEX": {"amount": 3000, "discount_price": 197},
+    "SU26248RMFS3": {"amount": 3000, "discount_price": 831},
 }
 
 def money_value_to_float(money: MoneyValue) -> float:
-    """Конвертация MoneyValue в float."""
-    return money.units + money.nano / 1e9
+    """
+    Конвертирует MoneyValue в float.
+    """
+    return round(money.units + money.nano / 1e9, 2)
 
 def get_account_id(client: Client) -> str:
-    """Получение ID первого доступного счета."""
+    """
+    Получает первый доступный торговый счет пользователя.
+    """
     accounts = client.users.get_accounts().accounts
     if not accounts:
-        raise RuntimeError("Нет доступных счетов")
+        raise RuntimeError("🚨 Нет доступных счетов!")
     return accounts[0].id
 
 def get_figi(client: Client, ticker: str) -> str:
-    """Поиск FIGI для тикера среди акций, ETF и облигаций."""
-    # Поиск среди акций
-    instruments = client.instruments.shares()
-    figi = next((share.figi for share in instruments.instruments if share.ticker == ticker), None)
-
-    # Если не найдено, поиск среди ETF
-    if not figi:
-        instruments = client.instruments.etfs()
-        figi = next((etf.figi for etf in instruments.instruments if etf.ticker == ticker), None)
-
-    # Если не найдено, поиск среди облигаций
-    if not figi:
-        instruments = client.instruments.bonds()
-        figi = next((bond.figi for bond in instruments.instruments if bond.ticker == ticker), None)
-
-    if not figi:
-        raise ValueError(f"Тикер {ticker} не найден среди акций, ETF или облигаций")
-    
-    return figi
+    """
+    Получает FIGI инструмента по его тикеру.
+    """
+    for method in [client.instruments.shares, client.instruments.etfs, client.instruments.bonds]:
+        instruments = method().instruments
+        figi = next((instr.figi for instr in instruments if instr.ticker == ticker), None)
+        if figi:
+            return figi
+    raise ValueError(f"❌ Тикер {ticker} не найден!")
 
 def get_share_price(client: Client, figi: str) -> float:
-    """Получение текущей цены акции, ETF или облигации по FIGI."""
+    """
+    Получает текущую рыночную цену инструмента по его FIGI.
+    """
     orderbook = client.market_data.get_order_book(figi=figi, depth=1)
-
-    # Получаем данные о всех облигациях
-    instruments = client.instruments.bonds()
-    
-    # Ищем облигацию по FIGI
-    bond = next((b for b in instruments.instruments if b.figi == figi), None)
-    
-    if bond:
-        # Получаем цену облигации в процентах от номинала
-        price_percent = money_value_to_float(orderbook.last_price)  # Цена в процентах
-        nominal_value = money_value_to_float(bond.nominal)  # Допустим номинал облигации 1000 рублей (можно взять из данных)
-        
-        # Рассчитываем реальную цену облигации в рублях
-        real_price = (price_percent * nominal_value) / 100
-        return real_price
-
-    return money_value_to_float(orderbook.last_price)
-
-def get_bond_nkd(client: Client, figi: str) -> float:
-    """Получение НКД для облигации по FIGI."""
-    instruments = client.instruments.bonds()
-    bond = next((bond for bond in instruments.instruments if bond.figi == figi), None)
-    if bond and bond.aci_value:
-        return money_value_to_float(bond.aci_value)
-    return 0.0
+    return round(money_value_to_float(orderbook.last_price), 2)
 
 def get_lot_size(client: Client, ticker: str) -> int:
-    """Поиск размера лота для тикера среди акций, ETF и облигаций."""
-    # Поиск среди акций
-    instruments = client.instruments.shares()
-    lot_size = next((share.lot for share in instruments.instruments if share.ticker == ticker), None)
+    """
+    Получает размер лота инструмента по тикеру.
+    """
+    for method in [client.instruments.shares, client.instruments.etfs, client.instruments.bonds]:
+        instruments = method().instruments
+        lot_size = next((instr.lot for instr in instruments if instr.ticker == ticker), None)
+        if lot_size:
+            return lot_size
+    raise ValueError(f"⚠️ Лот для {ticker} не найден!")
 
-    # Если не найдено, поиск среди ETF
-    if lot_size is None:
-        instruments = client.instruments.etfs()
-        lot_size = next((etf.lot for etf in instruments.instruments if etf.ticker == ticker), None)
-
-    # Если не найдено, поиск среди облигаций
-    if lot_size is None:
-        instruments = client.instruments.bonds()
-        lot_size = next((bond.lot for bond in instruments.instruments if bond.ticker == ticker), None)
-
-    if lot_size is None:
-        raise ValueError(f"Размер лота для тикера {ticker} не найден среди акций, ETF или облигаций")
-    
-    return lot_size
-
-
-def buy_share(client: Client, account_id: str, figi: str, money_amount: float, ticker: str):
-    """Покупка акции, ETF или облигации на заданную сумму с учетом НКД для облигаций."""
-    print(ticker)
-
-    # Получаем текущую цену бумаги
+def place_limit_order(client: Client, account_id: str, figi: str, money_amount: float, ticker: str, params: dict):
+    """
+    Выставляет лимитную заявку на покупку.
+    """
     price = get_share_price(client, figi)
     lot_size = get_lot_size(client, ticker)
     
-    # Проверяем, является ли инструмент облигацией
-    is_bond = any(bond.figi == figi for bond in client.instruments.bonds().instruments)
-
-    if is_bond:
-        # Если это облигация, добавляем НКД
-        nkd = get_bond_nkd(client, figi)  # Получаем НКД
-        price_with_nkd = price + nkd  # Добавляем НКД к цене
-        print(f"Цена облигации {ticker}: {price:.2f} руб.".replace(".", ","))
-        print(f"Учтен НКД: {nkd:.2f} руб.".replace(".", ","))
-        print(f"Итоговая цена с учетом НКД: {price_with_nkd:.2f} руб.".replace(".", ","))
-
-    # Рассчитываем количество лотов, которые можно купить
-    lots = int(money_amount // (price * lot_size))
-
+    discount = params.get("discount", DEFAULT_DISCOUNT)
+    discount_price = params.get("discount_price")
+    
+    limit_price = discount_price if discount_price else round(price * (1 - discount / 100), 2)
+    
+    lots = int(money_amount // (limit_price * lot_size))
+    
     if lots > 0:
-        # Генерируем уникальный order_id с использованием uuid
         order_id = str(uuid.uuid4())
-
-        # Отправляем заявку на покупку
         client.orders.post_order(
             figi=figi,
             quantity=lots,
             account_id=account_id,
             direction=OrderDirection.ORDER_DIRECTION_BUY,
-            order_type=OrderType.ORDER_TYPE_MARKET,
-            order_id=order_id,  # Уникальный ID заявки
+            order_type=OrderType.ORDER_TYPE_LIMIT,
+            order_id=order_id,
+            price=MoneyValue(units=int(limit_price), nano=int((limit_price % 1) * 1e9)),
         )
-        spent_amount = price_with_nkd * lots * lot_size if 'SU' in ticker else price * lots * lot_size  # Сумма, потраченная на покупку
-        print(f"Куплено {lots * lot_size} бумаги {ticker} на сумму {spent_amount:.2f} руб. по цене {price_with_nkd if 'SU' in ticker else price:.2f} за бумагу ({lot_size} в лоте)".replace(".", ","))
+
+        print(f"✅ Заявка на {lots * lot_size} бумаг {ticker} по {str(limit_price).replace('.', ',')} руб. выставлена. "
+              f"(Текущая цена: {str(price).replace('.', ',')} руб.). Сумма: {str(lots * lot_size * limit_price).replace('.', ',')} руб.")
+
     else:
-        print(f"Недостаточно средств для покупки {ticker}")
+        print(f"❌ Недостаточно средств для заявки {ticker}")
+
+def cancel_orders(client: Client, account_id: str):
+    orders = client.orders.get_orders(account_id=account_id).orders
+    for order in orders:
+        client.orders.cancel_order(account_id=account_id, order_id=order.order_id)
+        print(f"🛑 Отменена заявка {order.order_id}")
+
+def buy_share(client: Client, account_id: str, figi: str, money_amount: float, ticker: str):
+    """
+    Совершает рыночную покупку инструмента и сразу получает реальную цену,
+    если она доступна в ответе post_order(). В противном случае ждет обновления портфеля.
+    """
+    lot_size = get_lot_size(client, ticker)
+    price = get_share_price(client, figi)
+    lots = int(money_amount // (price * lot_size))
+
+    if lots > 0:
+        order_id = str(uuid.uuid4())
+        order_response = client.orders.post_order(
+            figi=figi,
+            quantity=lots,
+            account_id=account_id,
+            direction=OrderDirection.ORDER_DIRECTION_BUY,
+            order_type=OrderType.ORDER_TYPE_MARKET,
+            order_id=order_id,
+        )
+
+        total_price = lots * lot_size * price
+        print(f"✅ Заявка на {lots * lot_size} бумаг {ticker} по {str(price).replace('.', ',')} руб. выставлена. "
+              f"(Текущая цена: {str(price).replace('.', ',')} руб.). Сумма: {str(total_price).replace('.', ',')} руб.")
+
+
+        real_price = None
+        if order_response.executed_order_price:
+            real_price = money_value_to_float(order_response.executed_order_price)
+            print(f"💰 Фактическая цена покупки {ticker}: {str(real_price).replace('.', ',')} руб.")
+            return
+
+        for attempt in range(5):
+            time.sleep(1)
+            
+            positions = client.operations.get_portfolio(account_id=account_id).positions
+            for position in positions:
+                if position.figi == figi and position.average_position_price:
+                    real_price = money_value_to_float(position.average_position_price)
+                    break
+
+            if real_price:
+                break
+
+        if real_price:
+            print(f"💰 Фактическая цена покупки {ticker}: {real_price:.2f} руб.")
+        else:
+            print(f"⚠️ Не удалось получить фактическую цену покупки {ticker}, API не успел обновить данные.")
+    else:
+        print(f"❌ Недостаточно средств для покупки {ticker}")
+
 
 
 def main():
+    """
+    Основная функция: выбирает режим работы и выполняет соответствующие операции.
+    """
+    parser = argparse.ArgumentParser(description="Скрипт для торговли на Tinkoff API.",formatter_class=argparse.RawTextHelpFormatter)
+    parser.add_argument("-m", "--mode", type=int, choices=[1, 2, 3], required=True,
+                        help="Режим работы:\n"
+                            "1 - Выставление заявок ниже текущих цен,\n"
+                            "2 - Отмена всех заявок, "
+                            "3 - Покупка по рынку")
+    args = parser.parse_args()
+    
     with Client(TOKEN) as client:
-        try:
-            # Получаем ID счета
-            account_id = get_account_id(client)
-            print(f"Используемый ID счета: {account_id}")
-
-            # Обрабатываем тикеры
-            for ticker, amount in SHARES.items():
-                print("----")
-                try:
-                    figi = get_figi(client, ticker)
-                    buy_share(client, account_id, figi, amount, ticker)
-                except ValueError as e:
-                    print(e)
-                except Exception as e:
-                    print(f"Ошибка при обработке тикера {ticker}: {e}")
-        except Exception as e:
-            print(f"Ошибка: {e}")
+        account_id = get_account_id(client)
+        print(f"📌 Используемый ID счета: {account_id}")
+        
+        if args.mode == 1:
+            print("\n🚀 --- Выставление заявок ---")
+            for ticker, params in SHARES.items():
+                figi = get_figi(client, ticker)
+                place_limit_order(client, account_id, figi, params["amount"], ticker, params)
+        
+        elif args.mode == 2:
+            print("\n⛔ --- Отмена всех заявок ---")
+            cancel_orders(client, account_id)
+        
+        elif args.mode == 3:
+            print("\n💸 --- Покупка по текущей цене ---")
+            for ticker, params in SHARES.items():
+                figi = get_figi(client, ticker)
+                buy_share(client, account_id, figi, params["amount"], ticker)
 
 if __name__ == "__main__":
     main()
