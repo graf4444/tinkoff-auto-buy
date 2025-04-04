@@ -55,6 +55,12 @@ def get_share_price(client: Client, figi: str) -> float:
     Получает текущую рыночную цену инструмента по его FIGI.
     """
     orderbook = client.market_data.get_order_book(figi=figi, depth=1)
+    instruments = client.instruments.bonds()
+    bond = next((b for b in instruments.instruments if b.figi == figi), None)
+    if bond:
+        price_percent = money_value_to_float(orderbook.last_price)
+        nominal_value = money_value_to_float(bond.nominal)
+        return round((price_percent * nominal_value) / 100, 2)
     return round(money_value_to_float(orderbook.last_price), 2)
 
 def get_lot_size(client: Client, ticker: str) -> int:
@@ -83,6 +89,15 @@ def place_limit_order(client: Client, account_id: str, figi: str, money_amount: 
     lots = int(money_amount // (limit_price * lot_size))
     
     if lots > 0:
+        planned_total_cost = lots * lot_size * limit_price
+        print(f"🔍 Планируется выставить заявку на покупку:")
+        print(f"  Тикер: {ticker}")
+        print(f"  Количество бумаг: {lots * lot_size}")
+        print(f"  Цена за бумагу: {str(limit_price).replace('.', ',')} руб.")
+        print(f"  Общая сумма заявки: {str(planned_total_cost).replace('.', ',')} руб.")
+        print(f"  Текущая цена: {str(price).replace('.', ',')} руб.")
+        print(f"  Скидка: {discount}%")
+
         order_id = str(uuid.uuid4())
         client.orders.post_order(
             figi=figi,
