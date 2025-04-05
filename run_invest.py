@@ -8,6 +8,9 @@ from tinkoff.invest import Client, MoneyValue, OrderType, OrderDirection
 TOKEN = config.TOKEN  # Токен для доступа к API
 DEFAULT_DISCOUNT = 3  # Дефолтная скидка в процентах
 
+SEPARATOR = "---------------------------------------"
+
+
 # Список ценных бумаг и параметры заявок
 # - "amount": сумма, на которую планируется покупка данного инструмента.
 # - "discount": процентная скидка от текущей рыночной цены для покупки. Если параметр не указан, используется дефолтная скидка DEFAULT_DISCOUNT.
@@ -15,13 +18,13 @@ DEFAULT_DISCOUNT = 3  # Дефолтная скидка в процентах
 # 
 # В зависимости от наличия скидки или фиксированной цены, будет рассчитана цена, по которой выставляется заявка.
 SHARES = {
-    "TRUR": {"amount": 3000, "discount_price": 8.6},
-    "TMOS": {"amount": 3000},
-    "TDIV": {"amount": 3000, "discount_price": 10},
-    "TGLD": {"amount": 3000, "discount": 2},
-    "SBER": {"amount": 3000, "discount_price": 302},
-    "MOEX": {"amount": 3000, "discount_price": 197},
-    "SU26248RMFS3": {"amount": 3000, "discount_price": 831},
+    "TRUR": {"amount": 3000+3.53, "discount": 5},
+    "TMOS": {"amount": 3000+2.73, "discount": 5},
+    "TDIV": {"amount": 3000+0.23, "discount": 5},
+    "TGLD": {"amount": 3000+4.74, "discount": 5},
+    "SBER": {"amount": 3000+15.7, "discount": 5},
+    "MOEX": {"amount": 3000+1070.6, "discount": 5},
+    "SU26248RMFS3": {"amount": 3000+234.11, "discount": 5},
 }
 
 def money_value_to_float(money: MoneyValue) -> float:
@@ -118,6 +121,7 @@ def place_limit_order(client: Client, account_id: str, figi: str, money_amount: 
 def cancel_orders(client: Client, account_id: str):
     orders = client.orders.get_orders(account_id=account_id).orders
     for order in orders:
+        print(SEPARATOR)
         try:
             client.orders.cancel_order(account_id=account_id, order_id=order.order_id)
             print(f"🛑 Отменена заявка {order.order_id}")
@@ -185,9 +189,24 @@ def main():
     parser.add_argument("-m", "--mode", type=int, choices=[1, 2, 3], required=True,
                         help="Режим работы:\n"
                             "1 - Выставление заявок ниже текущих цен,\n"
-                            "2 - Отмена всех заявок, "
+                            "2 - Отмена всех заявок,\n"
                             "3 - Покупка по рынку")
     args = parser.parse_args()
+
+    print(
+        r"""
+======================================================================================================================
+ _______ _       _            ___    ___    _______              _ _                 ______             _            
+(_______|_)     | |          / __)  / __)  (_______)            | (_)               / _____)           (_)       _   
+    _    _ ____ | |  _ ___ _| |__ _| |__       _  ____ _____  __| |_ ____   ____   ( (____   ____  ____ _ ____ _| |_ 
+   | |  | |  _ \| |_/ ) _ (_   __|_   __)     | |/ ___|____ |/ _  | |  _ \ / _  |   \____ \ / ___)/ ___) |  _ (_   _)
+   | |  | | | | |  _ ( |_| || |    | |        | | |   / ___ ( (_| | | | | ( (_| |   _____) | (___| |   | | |_| || |_ 
+   |_|  |_|_| |_|_| \_)___/ |_|    |_|        |_|_|   \_____|\____|_|_| |_|\___ |  (______/ \____)_|   |_|  __/  \__)
+                                                                          (_____|                        |_|         
+                                                    Tinkoff Trading Script
+======================================================================================================================
+"""
+    )
     
     with Client(TOKEN) as client:
         account_id = get_account_id(client)
@@ -196,6 +215,7 @@ def main():
         if args.mode == 1:
             print("\n🚀 --- Выставление заявок ---")
             for ticker, params in SHARES.items():
+                print(SEPARATOR)
                 try:
                     figi = get_figi(client, ticker)
                     place_limit_order(client, account_id, figi, params["amount"], ticker, params)
@@ -209,6 +229,7 @@ def main():
         elif args.mode == 3:
             print("\n💸 --- Покупка по текущей цене ---")
             for ticker, params in SHARES.items():
+                print(SEPARATOR)
                 try:
                     figi = get_figi(client, ticker)
                     buy_share(client, account_id, figi, params["amount"], ticker)
