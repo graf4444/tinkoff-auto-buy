@@ -118,8 +118,12 @@ def place_limit_order(client: Client, account_id: str, figi: str, money_amount: 
 def cancel_orders(client: Client, account_id: str):
     orders = client.orders.get_orders(account_id=account_id).orders
     for order in orders:
-        client.orders.cancel_order(account_id=account_id, order_id=order.order_id)
-        print(f"🛑 Отменена заявка {order.order_id}")
+        try:
+            client.orders.cancel_order(account_id=account_id, order_id=order.order_id)
+            print(f"🛑 Отменена заявка {order.order_id}")
+        except Exception as e:
+            print(f"⚠️ Не удалось отменить заявку {order.order_id}: {e}")
+
 
 def buy_share(client: Client, account_id: str, figi: str, money_amount: float, ticker: str):
     """
@@ -192,18 +196,24 @@ def main():
         if args.mode == 1:
             print("\n🚀 --- Выставление заявок ---")
             for ticker, params in SHARES.items():
-                figi = get_figi(client, ticker)
-                place_limit_order(client, account_id, figi, params["amount"], ticker, params)
-        
+                try:
+                    figi = get_figi(client, ticker)
+                    place_limit_order(client, account_id, figi, params["amount"], ticker, params)
+                except Exception as e:
+                    print(f"❌ Ошибка при обработке {ticker}: {e}")
+
         elif args.mode == 2:
             print("\n⛔ --- Отмена всех заявок ---")
             cancel_orders(client, account_id)
-        
+
         elif args.mode == 3:
             print("\n💸 --- Покупка по текущей цене ---")
             for ticker, params in SHARES.items():
-                figi = get_figi(client, ticker)
-                buy_share(client, account_id, figi, params["amount"], ticker)
+                try:
+                    figi = get_figi(client, ticker)
+                    buy_share(client, account_id, figi, params["amount"], ticker)
+                except Exception as e:
+                    print(f"❌ Ошибка при покупке {ticker}: {e}")
 
 if __name__ == "__main__":
     main()
