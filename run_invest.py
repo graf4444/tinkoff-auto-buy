@@ -2,14 +2,19 @@ import argparse
 import uuid
 import config
 import time
+import os
+import datetime
+import logging
+from logging import StreamHandler, FileHandler
 from tinkoff.invest import Client, MoneyValue, OrderType, OrderDirection
+
 
 # Задайте параметры
 TOKEN = config.TOKEN  # Токен для доступа к API
 DEFAULT_DISCOUNT = 3  # Дефолтная скидка в процентах
 
 SEPARATOR = "---------------------------------------"
-
+LOG_DIR = "logs"
 
 # Список ценных бумаг и параметры заявок
 # - "amount": сумма, на которую планируется покупка данного инструмента.
@@ -18,14 +23,44 @@ SEPARATOR = "---------------------------------------"
 # 
 # В зависимости от наличия скидки или фиксированной цены, будет рассчитана цена, по которой выставляется заявка.
 SHARES = {
-    "TRUR": {"amount": 3000+3.53, "discount": 5},
-    "TMOS": {"amount": 3000+2.73, "discount": 5},
-    "TDIV": {"amount": 3000+0.23, "discount": 5},
-    "TGLD": {"amount": 3000+4.74, "discount": 5},
-    "SBER": {"amount": 3000+15.7, "discount": 5},
-    "MOEX": {"amount": 3000+1070.6, "discount": 5},
-    "SU26248RMFS3": {"amount": 3000+234.11, "discount": 5},
+    "TRUR": {"amount": 3000, "discount": 5},
+    "TMOS": {"amount": 3000, "discount": 5},
+    "TDIV": {"amount": 3000, "discount": 5},
+    "TGLD": {"amount": 3000, "discount": 5},
+    "SBER": {"amount": 3000, "discount": 5},
+    "MOEX": {"amount": 3000, "discount_price": 180},
+    "SU26248RMFS3": {"amount": 3000, "discount": 5},
 }
+
+
+# === Настройка логирования ===
+script_dir = os.path.dirname(os.path.abspath(__file__))
+log_dir = os.path.join(script_dir, LOG_DIR)
+os.makedirs(log_dir, exist_ok=True)
+
+timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+log_file = os.path.join(log_dir, f"log_{timestamp}.log")
+
+# Создание логгера
+logger = logging.getLogger("my_script_logger")
+logger.setLevel(logging.INFO)
+logger.propagate = False
+
+# Формат вывода
+file_formatter = logging.Formatter(
+        '[%(asctime)s.%(msecs)03d] %(levelname)s: %(message)s',
+        datefmt='%H:%M:%S'
+    )
+
+# Обработчик для файла
+file_handler = FileHandler(log_file, encoding='utf-8')
+file_handler.setFormatter(file_formatter)
+logger.addHandler(file_handler)
+
+# Обработчик для консоли
+console_handler = StreamHandler()
+logger.addHandler(console_handler)
+# ==============================
 
 def money_value_to_float(money: MoneyValue) -> float:
     """
@@ -86,20 +121,27 @@ def place_limit_order(client: Client, account_id: str, figi: str, money_amount: 
     
     discount = params.get("discount", DEFAULT_DISCOUNT)
     discount_price = params.get("discount_price")
-    
+
+    if discount_price:
+        limit_price = discount_price
+        discount_text = f"Используется фиксированная цена: {str(discount_price).replace('.', ',')} руб."
+    else:
+        limit_price = round(price * (1 - discount / 100), 2)
+        discount_text = f"Скидка: {discount}%"
+
     limit_price = discount_price if discount_price else round(price * (1 - discount / 100), 2)
     
     lots = int(money_amount // (limit_price * lot_size))
     
     if lots > 0:
         planned_total_cost = lots * lot_size * limit_price
-        print(f"🔍 Планируется выставить заявку на покупку:")
-        print(f"  Тикер: {ticker}")
-        print(f"  Количество бумаг: {lots * lot_size}")
-        print(f"  Цена за бумагу: {str(limit_price).replace('.', ',')} руб.")
-        print(f"  Общая сумма заявки: {str(planned_total_cost).replace('.', ',')} руб.")
-        print(f"  Текущая цена: {str(price).replace('.', ',')} руб.")
-        print(f"  Скидка: {discount}%")
+        logger.info(f"🔍 Планируется выставить заявку на покупку:")
+        logger.info(f"  Тикер: {ticker}")
+        logger.info(f"  Количество бумаг: {lots * lot_size}")
+        logger.info(f"  Цена за бумагу: {str(limit_price).replace('.', ',')} руб.")
+        logger.info(f"  Общая сумма заявки: {str(planned_total_cost).replace('.', ',')} руб.")
+        logger.info(f"  Текущая цена: {str(price).replace('.', ',')} руб.")
+        logger.info(f"  {discount_text}")
 
         order_id = str(uuid.uuid4())
         client.orders.post_order(
@@ -112,21 +154,21 @@ def place_limit_order(client: Client, account_id: str, figi: str, money_amount: 
             price=MoneyValue(units=int(limit_price), nano=int((limit_price % 1) * 1e9)),
         )
 
-        print(f"✅ Заявка на {lots * lot_size} бумаг {ticker} по {str(limit_price).replace('.', ',')} руб. выставлена. "
+        logger.info(f"✅ Заявка на {lots * lot_size} бумаг {ticker} по {str(limit_price).replace('.', ',')} руб. выставлена. "
               f"(Текущая цена: {str(price).replace('.', ',')} руб.). Сумма: {str(lots * lot_size * limit_price).replace('.', ',')} руб.")
 
     else:
-        print(f"❌ Недостаточно средств для заявки {ticker}")
+        logger.info(f"❌ Недостаточно средств для заявки {ticker}")
 
 def cancel_orders(client: Client, account_id: str):
     orders = client.orders.get_orders(account_id=account_id).orders
     for order in orders:
-        print(SEPARATOR)
+        logger.info(SEPARATOR)
         try:
             client.orders.cancel_order(account_id=account_id, order_id=order.order_id)
-            print(f"🛑 Отменена заявка {order.order_id}")
+            logger.info(f"🛑 Отменена заявка {order.order_id}")
         except Exception as e:
-            print(f"⚠️ Не удалось отменить заявку {order.order_id}: {e}")
+            logger.info(f"⚠️ Не удалось отменить заявку {order.order_id}: {e}")
 
 
 def buy_share(client: Client, account_id: str, figi: str, money_amount: float, ticker: str):
@@ -150,14 +192,14 @@ def buy_share(client: Client, account_id: str, figi: str, money_amount: float, t
         )
 
         total_price = lots * lot_size * price
-        print(f"✅ Заявка на {lots * lot_size} бумаг {ticker} по {str(price).replace('.', ',')} руб. выставлена. "
+        logger.info(f"✅ Заявка на {lots * lot_size} бумаг {ticker} по {str(price).replace('.', ',')} руб. выставлена. "
               f"(Текущая цена: {str(price).replace('.', ',')} руб.). Сумма: {str(total_price).replace('.', ',')} руб.")
 
 
         real_price = None
         if order_response.executed_order_price:
             real_price = money_value_to_float(order_response.executed_order_price)
-            print(f"💰 Фактическая цена покупки {ticker}: {str(real_price).replace('.', ',')} руб.")
+            logger.info(f"💰 Фактическая цена покупки {ticker}: {str(real_price).replace('.', ',')} руб.")
             return
 
         for attempt in range(5):
@@ -173,11 +215,11 @@ def buy_share(client: Client, account_id: str, figi: str, money_amount: float, t
                 break
 
         if real_price:
-            print(f"💰 Фактическая цена покупки {ticker}: {real_price:.2f} руб.")
+            logger.info(f"💰 Фактическая цена покупки {ticker}: {real_price:.2f} руб.")
         else:
-            print(f"⚠️ Не удалось получить фактическую цену покупки {ticker}, API не успел обновить данные.")
+            logger.info(f"⚠️ Не удалось получить фактическую цену покупки {ticker}, API не успел обновить данные.")
     else:
-        print(f"❌ Недостаточно средств для покупки {ticker}")
+        logger.info(f"❌ Недостаточно средств для покупки {ticker}")
 
 
 
@@ -193,7 +235,7 @@ def main():
                             "3 - Покупка по рынку")
     args = parser.parse_args()
 
-    print(
+    logger.info(
         r"""
 ======================================================================================================================
  _______ _       _            ___    ___    _______              _ _                 ______             _            
@@ -210,31 +252,31 @@ def main():
     
     with Client(TOKEN) as client:
         account_id = get_account_id(client)
-        print(f"📌 Используемый ID счета: {account_id}")
+        logger.info(f"📌 Используемый ID счета: {account_id}")
         
         if args.mode == 1:
-            print("\n🚀 --- Выставление заявок ---")
+            logger.info("\n🚀 --- Выставление заявок ---")
             for ticker, params in SHARES.items():
-                print(SEPARATOR)
+                logger.info(SEPARATOR)
                 try:
                     figi = get_figi(client, ticker)
                     place_limit_order(client, account_id, figi, params["amount"], ticker, params)
                 except Exception as e:
-                    print(f"❌ Ошибка при обработке {ticker}: {e}")
+                    logger.info(f"❌ Ошибка при обработке {ticker}: {e}")
 
         elif args.mode == 2:
-            print("\n⛔ --- Отмена всех заявок ---")
+            logger.info("\n⛔ --- Отмена всех заявок ---")
             cancel_orders(client, account_id)
 
         elif args.mode == 3:
-            print("\n💸 --- Покупка по текущей цене ---")
+            logger.info("\n💸 --- Покупка по текущей цене ---")
             for ticker, params in SHARES.items():
-                print(SEPARATOR)
+                logger.info(SEPARATOR)
                 try:
                     figi = get_figi(client, ticker)
                     buy_share(client, account_id, figi, params["amount"], ticker)
                 except Exception as e:
-                    print(f"❌ Ошибка при покупке {ticker}: {e}")
+                    logger.info(f"❌ Ошибка при покупке {ticker}: {e}")
 
 if __name__ == "__main__":
     main()
