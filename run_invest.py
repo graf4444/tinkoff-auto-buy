@@ -8,8 +8,7 @@ import logging
 from logging import StreamHandler, FileHandler
 from tinkoff.invest import Client, MoneyValue, OrderType, OrderDirection
 
-
-# Задайте параметры
+# Параметры
 TOKEN = config.TOKEN  # Токен для доступа к API
 DEFAULT_DISCOUNT = 3  # Дефолтная скидка в процентах
 
@@ -48,9 +47,9 @@ logger.propagate = False
 
 # Формат вывода
 file_formatter = logging.Formatter(
-        '[%(asctime)s.%(msecs)03d] %(levelname)s: %(message)s',
-        datefmt='%H:%M:%S'
-    )
+    '[%(asctime)s.%(msecs)03d] %(levelname)s: %(message)s',
+    datefmt='%H:%M:%S'
+)
 
 # Обработчик для файла
 file_handler = FileHandler(log_file, encoding='utf-8')
@@ -62,6 +61,7 @@ console_handler = StreamHandler()
 logger.addHandler(console_handler)
 # ==============================
 
+# === Функции работы с API ===
 def money_value_to_float(money: MoneyValue) -> float:
     """
     Конвертирует MoneyValue в float.
@@ -69,13 +69,29 @@ def money_value_to_float(money: MoneyValue) -> float:
     return round(money.units + money.nano / 1e9, 2)
 
 def get_account_id(client: Client) -> str:
-    """
-    Получает первый доступный торговый счет пользователя.
-    """
     accounts = client.users.get_accounts().accounts
     if not accounts:
         raise RuntimeError("🚨 Нет доступных счетов!")
-    return accounts[0].id
+    
+    if len(accounts) == 1:
+        logger.info(f"📌 Найден единственный счет: {accounts[0].name} ({accounts[0].id})")
+        return accounts[0].id
+
+    logger.info("📋 Доступные счета:")
+    for idx, account in enumerate(accounts, 1):
+        logger.info(f"{idx}. {account.name} (ID: {account.id})")
+    
+    while True:
+        try:
+            choice = int(input(f"Введите номер счета (1-{len(accounts)}): "))
+            if 1 <= choice <= len(accounts):
+                selected_account = accounts[choice - 1]
+                logger.info(f"✅ Выбран счет: {selected_account.name} (ID: {selected_account.id})")
+                return selected_account.id
+            else:
+                logger.info("⚠️ Неверный выбор, попробуйте снова.")
+        except ValueError:
+            logger.info("⚠️ Введите числовое значение.")
 
 def get_figi(client: Client, ticker: str) -> str:
     """
@@ -170,7 +186,6 @@ def cancel_orders(client: Client, account_id: str):
         except Exception as e:
             logger.info(f"⚠️ Не удалось отменить заявку {order.order_id}: {e}")
 
-
 def buy_share(client: Client, account_id: str, figi: str, money_amount: float, ticker: str):
     """
     Совершает рыночную покупку инструмента и сразу получает реальную цену,
@@ -222,54 +237,66 @@ def buy_share(client: Client, account_id: str, figi: str, money_amount: float, t
         logger.info(f"❌ Недостаточно средств для покупки {ticker}")
 
 
-
+# === Основная функция ===
 def main():
-    """
-    Основная функция: выбирает режим работы и выполняет соответствующие операции.
-    """
-    parser = argparse.ArgumentParser(description="Скрипт для торговли на Tinkoff API.",formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument("-m", "--mode", type=int, choices=[1, 2, 3], required=True,
+    parser = argparse.ArgumentParser(description="Скрипт для торговли на Tinkoff API.", formatter_class=argparse.RawTextHelpFormatter)
+    parser.add_argument("-m", "--mode", type=int, choices=[1, 2, 3],
                         help="Режим работы:\n"
-                            "1 - Выставление заявок ниже текущих цен,\n"
-                            "2 - Отмена всех заявок,\n"
-                            "3 - Покупка по рынку")
+                             "1 - Выставление заявок ниже текущих цен\n"
+                             "2 - Отмена всех заявок\n"
+                             "3 - Покупка по рынку")
     args = parser.parse_args()
 
     logger.info(
         r"""
 ======================================================================================================================
- _______ _       _            ___    ___    _______              _ _                 ______             _            
-(_______|_)     | |          / __)  / __)  (_______)            | (_)               / _____)           (_)       _   
-    _    _ ____ | |  _ ___ _| |__ _| |__       _  ____ _____  __| |_ ____   ____   ( (____   ____  ____ _ ____ _| |_ 
-   | |  | |  _ \| |_/ ) _ (_   __|_   __)     | |/ ___|____ |/ _  | |  _ \ / _  |   \____ \ / ___)/ ___) |  _ (_   _)
-   | |  | | | | |  _ ( |_| || |    | |        | | |   / ___ ( (_| | | | | ( (_| |   _____) | (___| |   | | |_| || |_ 
-   |_|  |_|_| |_|_| \_)___/ |_|    |_|        |_|_|   \_____|\____|_|_| |_|\___ |  (______/ \____)_|   |_|  __/  \__)
-                                                                          (_____|                        |_|         
-                                                    Tinkoff Trading Script
+  _______       __         ________   ____           __             __  ___                                 
+ /_  __(_)___  / /______  / __/ __/  / __ \_________/ /__  _____   /  |/  /___ _____  ____ _____ ____  _____
+  / / / / __ \/ //_/ __ \/ /_/ /_   / / / / ___/ __  / _ \/ ___/  / /|_/ / __ `/ __ \/ __ `/ __ `/ _ \/ ___/
+ / / / / / / / ,< / /_/ / __/ __/  / /_/ / /  / /_/ /  __/ /     / /  / / /_/ / / / / /_/ / /_/ /  __/ /    
+/_/ /_/_/ /_/_/|_|\____/_/ /_/     \____/_/   \__,_/\___/_/     /_/  /_/\__,_/_/ /_/\__,_/\__, /\___/_/     
+                                                                                         /____/             
+
+                                                    Tinkoff Order Manager
 ======================================================================================================================
 """
     )
-    
+
+    mode = args.mode
+    if mode is None:
+        logger.info("🎛️ Выберите режим работы:")
+        logger.info("1 - Выставление лимитных заявок ниже текущих цен")
+        logger.info("2 - Отмена всех заявок")
+        logger.info("3 - Покупка по рыночной цене")
+        while True:
+            try:
+                mode = int(input("Введите номер режима (1-3): "))
+                if mode in [1, 2, 3]:
+                    break
+                else:
+                    logger.info("⚠️ Неверный выбор, попробуйте снова.")
+            except ValueError:
+                logger.info("⚠️ Введите числовое значение.")
+
     with Client(TOKEN) as client:
         account_id = get_account_id(client)
-        logger.info(f"📌 Используемый ID счета: {account_id}")
-        
-        if args.mode == 1:
-            logger.info("\n🚀 --- Выставление заявок ---")
-            for ticker, params in SHARES.items():
-                logger.info(SEPARATOR)
-                try:
-                    figi = get_figi(client, ticker)
-                    place_limit_order(client, account_id, figi, params["amount"], ticker, params)
-                except Exception as e:
-                    logger.info(f"❌ Ошибка при обработке {ticker}: {e}")
 
-        elif args.mode == 2:
+        if mode == 1:
+            logger.info("\n🚀 --- Выставление заявок ---")
+            # for ticker, params in SHARES.items():
+            #     logger.info(SEPARATOR)
+            #     try:
+            #         figi = get_figi(client, ticker)
+            #         place_limit_order(client, account_id, figi, params["amount"], ticker, params)
+            #     except Exception as e:
+            #         logger.info(f"❌ Ошибка при обработке {ticker}: {e}")
+
+        elif mode == 2:
             logger.info("\n⛔ --- Отмена всех заявок ---")
             cancel_orders(client, account_id)
 
-        elif args.mode == 3:
-            logger.info("\n💸 --- Покупка по текущей цене ---")
+        elif mode == 3:
+            logger.info("\n💸 --- Покупка по рынку ---")
             for ticker, params in SHARES.items():
                 logger.info(SEPARATOR)
                 try:
