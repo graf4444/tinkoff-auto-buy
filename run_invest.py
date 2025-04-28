@@ -283,13 +283,13 @@ def main():
 
         if mode == 1:
             logger.info("\n🚀 --- Выставление заявок ---")
-            # for ticker, params in SHARES.items():
-            #     logger.info(SEPARATOR)
-            #     try:
-            #         figi = get_figi(client, ticker)
-            #         place_limit_order(client, account_id, figi, params["amount"], ticker, params)
-            #     except Exception as e:
-            #         logger.info(f"❌ Ошибка при обработке {ticker}: {e}")
+            for ticker, params in SHARES.items():
+                logger.info(SEPARATOR)
+                try:
+                    figi = get_figi(client, ticker)
+                    place_limit_order(client, account_id, figi, params["amount"], ticker, params)
+                except Exception as e:
+                    logger.info(f"❌ Ошибка при обработке {ticker}: {e}")
 
         elif mode == 2:
             logger.info("\n⛔ --- Отмена всех заявок ---")
